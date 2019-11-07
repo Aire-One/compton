@@ -1189,10 +1189,13 @@ paint_preprocess(session_t *ps, win *list) {
       }
 
       // Calculate shadow opacity
-      if (w->frame_opacity)
-        w->shadow_opacity = ps->o.shadow_opacity * w->frame_opacity;
-      else
-        w->shadow_opacity = ps->o.shadow_opacity * get_opacity_percent(w);
+      {
+        double shadow_opacity = (w->focused ? ps->o.shadow_opacity: ps->o.inactive_shadow_opacity);
+        if (w->frame_opacity)
+          w->shadow_opacity = shadow_opacity * w->frame_opacity;
+        else
+          w->shadow_opacity = shadow_opacity * get_opacity_percent(w);
+      }
     }
 
     // Add window to damaged area if its painting status changes
@@ -4551,6 +4554,9 @@ usage(int ret) {
     "--write-pid-path path\n"
     "  Write process ID to a file.\n"
     "\n"
+    "--inactive-shadow-opacity\n"
+    "  Opacity of shadow for inactives windows.\n"
+    "\n"
     "--shadow-red value\n"
     "  Red color value of shadow (0.0 - 1.0, defaults to 0).\n"
     "\n"
@@ -5056,7 +5062,7 @@ parse_matrix(session_t *ps, const char *src, const char **endptr) {
   int wid = 0, hei = 0;
   const char *pc = NULL;
   XFixed *matrix = NULL;
-  
+
   // Get matrix width and height
   {
     double val = 0.0;
@@ -5517,6 +5523,8 @@ parse_config(session_t *ps, struct options_tmp *pcfgtmp) {
   lcfg_lookup_int(&cfg, "shadow-radius", &ps->o.shadow_radius);
   // -o (shadow_opacity)
   config_lookup_float(&cfg, "shadow-opacity", &ps->o.shadow_opacity);
+  // --inactive-shadow-opacity
+  config_lookup_float(&cfg, "inactive-shadow-opacity", &ps->o.inactive_shadow_opacity);
   // -l (shadow_offset_x)
   lcfg_lookup_int(&cfg, "shadow-offset-x", &ps->o.shadow_offset_x);
   // -t (shadow_offset_y)
@@ -5784,6 +5792,7 @@ get_cfg(session_t *ps, int argc, char *const *argv, bool first_pass) {
     { "blur-strength", required_argument, NULL, 322 },
     { "reredir-on-root-change", no_argument, NULL, 731 },
     { "glx-reinit-on-root-change", no_argument, NULL, 732 },
+    { "inactive-shadow-opacity", required_argument, NULL, 800 },
     // Must terminate with a NULL entry
     { NULL, 0, NULL, 0 },
   };
@@ -6065,6 +6074,10 @@ get_cfg(session_t *ps, int argc, char *const *argv, bool first_pass) {
         break;
       P_CASEBOOL(731, reredir_on_root_change);
       P_CASEBOOL(732, glx_reinit_on_root_change);
+      case 800:
+        // --inactive-shadow-opacity
+        ps->o.inactive_shadow_opacity = atof(optarg);
+        break;
       default:
         usage(1);
         break;
@@ -6085,6 +6098,10 @@ get_cfg(session_t *ps, int argc, char *const *argv, bool first_pass) {
   ps->o.inactive_dim = normalize_d(ps->o.inactive_dim);
   ps->o.frame_opacity = normalize_d(ps->o.frame_opacity);
   ps->o.shadow_opacity = normalize_d(ps->o.shadow_opacity);
+  ps->o.inactive_shadow_opacity = normalize_d(ps->o.inactive_shadow_opacity);
+  if (!ps->o.inactive_shadow_opacity && ps->o.inactive_shadow_opacity != 0)
+    ps->o.inactive_shadow_opacity = ps->o.shadow_opacity;
+
   cfgtmp.menu_opacity = normalize_d(cfgtmp.menu_opacity);
   ps->o.refresh_rate = normalize_i_range(ps->o.refresh_rate, 0, 300);
   ps->o.alpha_step = normalize_d_range(ps->o.alpha_step, 0.01, 1.0);
@@ -6118,7 +6135,8 @@ get_cfg(session_t *ps, int argc, char *const *argv, bool first_pass) {
   // Other variables determined by options
 
   // Determine whether we need to track focus changes
-  if (ps->o.inactive_opacity || ps->o.active_opacity || ps->o.inactive_dim) {
+  if (ps->o.inactive_opacity || ps->o.inactive_dim
+      || ps->o.shadow_opacity != ps->o.inactive_shadow_opacity) {
     ps->o.track_focus = true;
   }
 
@@ -7052,6 +7070,7 @@ session_init(session_t *ps_old, int argc, char **argv) {
       .shadow_ignore_shaped = false,
       .respect_prop_shadow = false,
       .xinerama_shadow_crop = false,
+      .inactive_shadow_opacity = 0.0,
 
       .wintype_fade = { false },
       .fade_in_step = 0.028 * OPAQUE,
